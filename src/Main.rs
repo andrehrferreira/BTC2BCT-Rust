@@ -1,58 +1,87 @@
+use std::collections::HashSet;
+use std::fs::{File, OpenOptions};
+use std::io::{BufRead, BufReader, Write};
+use bitcoin::blockdata;
+use bitcoin::network::constants::Network::Bitcoin;
 use bitcoin::secp256k1::Secp256k1;
-use bitcoin::network::constants::Network;
-use bitcoin::address::Address;
-use bitcoin::bip32::{ExtendedPrivKey, DerivationPath};
-use bitcoin::secp256k1::PublicKey;
+use bitcoin::util::key;
+use bitcoin::Address;
 use rand::rngs::OsRng;
-use std::str::FromStr;
 
-#[derive(Debug)]
-struct Wallet {
-    private_key: String,
-    public_key: String,
-    addresses: Vec<String>,
+fn load_wallets(file_path: &str) -> HashSet<String> {
+    let file = File::open(file_path).expect("Unable to open file");
+    let reader = BufReader::new(file);
+    reader.lines().map(|line| line.unwrap()).collect()
 }
 
-fn get_addresses_from_public_key(public_key: &PublicKey) -> Vec<String> {
-    let compressed_pubkey = public_key.serialize();
-    vec![
-        // 1. P2PKH
-        Address::p2pkh(&compressed_pubkey, Network::Bitcoin).to_string(),
-
-        // 2. P2WPKH (SegWit)
-        Address::p2wpkh(&compressed_pubkey, Network::Bitcoin).to_string(),
-    ]
-}
-
-fn generate_wallets(wallet_count: usize) -> Vec<Wallet> {
+fn generate_and_check_wallets(
+    wallets: &HashSet<String>
+) -> Result<Vec<(key::PrivateKey, Address)>, Box<dyn std::error::Error>> {
+    let mut found_wallets = Vec::new();
     let secp = Secp256k1::new();
-    let mut rng = OsRng;
-    let master_key = ExtendedPrivKey::new_master(Network::Bitcoin, &mut rng).unwrap();
+    for i in 0..10 {
+        let path = format!("m/44'/0'/0'/0/{}", i);
+        let mut rng = OsRng::new().expect("OsRng");
+        let (secret_key, _) = secp.generate_keypair(&mut rng);
 
-    let mut wallets = Vec::new();
+        let private = key::PrivateKey {
+            compressed: false,
+            key: secret_key,
+            network: Bitcoin,
+        };
 
-    for i in 0..wallet_count {
-        let derivation_path = DerivationPath::from_str(&format!("m/44'/0'/0'/0/{}", i)).unwrap();
-        let child_key = master_key.derive_priv(&secp, &derivation_path).unwrap();
+        let public = private.public_key(&secp);
 
-        let public_key = PublicKey::from_secret_key(&secp, &child_key.private_key);
-        let addresses = get_addresses_from_public_key(&public_key);
+        let pub_bytes = &public.to_bytes()[..];
+        let uncompressed_p2pk = blockdata::script::Builder::new()
+        .push_slice(&pub_bytes)
+        .push_opcode(blockdata::opcodes::all::OP_CHECKSIG)
+        .into_script();
 
-        wallets.push(Wallet {
-            private_key: child_key.private_key.to_wif(),
-            public_key: public_key.to_string(),
-            addresses,
-        });
+        // Gerar endereço P2PKH (Pay-to-Public-Key-Hash)
+        let p2pkh = Address::p2pkh(&public, Bitcoin);
+
+        // Gerar endereço P2WPKH (Pay-to-Witness-Public-Key-Hash)
+        let p2wpkh = Address::p2wpkh(&public, Bitcoin);
+
+        // Criar script para P2WSH (Pay-to-Witness-Script-Hash)
+        let pub_bytes = &public.to_bytes()[..];
+        let uncompressed_p2pk = blockdata::script::Builder::new()
+            .push_slice(pub_bytes)
+            .push_opcode(blockdata::opcodes::all::OP_CHECKSIG)
+            .into_script();
+
+        let p2wsh = Address::p2wsh(&uncompressed_p2pk, Bitcoin);
+
+        // Criar script para P2SH (Pay-to-Script-Hash)
+        let p2sh = Address::p2sh(&uncompressed_p2pk, Bitcoin);
+
+        // Verificar se algum endereço corresponde às carteiras pré-carregadas
+        for address in &[p2pkh, p2sh, p2wpkh, p2wsh] {
+            if wallets.contains(&address.to_string()) {
+                found_wallets.push((private.clone(), address.clone()));
+            }
+        }
     }
-
-    wallets
+    Ok(found_wallets)
 }
 
-fn main() {
-    let wallet_count = 5; // Exemplo de quantidade de carteiras a serem geradas
-    let wallets = generate_wallets(wallet_count);
-
-    for (i, wallet) in wallets.iter().enumerate() {
-        println!("Wallet {}: {:?}", i + 1, wallet);
+fn save_found_wallets(file_path: &str, wallets: Vec<(key::PrivateKey, Address)>) {
+    let mut file = OpenOptions::new().append(true).open(file_path).unwrap();
+    for (private_key, address) in wallets {
+        writeln!(file, "Address: {}, Private Key: {}", address, private_key.to_wif()).unwrap();
     }
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let wallets = load_wallets("data/wallets.txt");
+    let found_wallets = generate_and_check_wallets(&wallets)?;
+
+    if !found_wallets.is_empty() {
+        save_found_wallets("data/found_wallets.txt", found_wallets);
+    } else {
+        println!("No matching wallets found.");
+    }
+
+    Ok(())
 }
