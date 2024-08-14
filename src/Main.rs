@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
+use std::time::{Duration, Instant};
 use bitcoin::blockdata;
 use bitcoin::network::constants::Network::Bitcoin;
 use bitcoin::secp256k1::Secp256k1;
@@ -19,8 +20,7 @@ fn generate_and_check_wallets(
 ) -> Result<Vec<(key::PrivateKey, Address)>, Box<dyn std::error::Error>> {
     let mut found_wallets = Vec::new();
     let secp = Secp256k1::new();
-    for i in 0..10 {
-        let path = format!("m/44'/0'/0'/0/{}", i);
+    //for i in 0..10 {
         let mut rng = OsRng::new().expect("OsRng");
         let (secret_key, _) = secp.generate_keypair(&mut rng);
 
@@ -62,7 +62,7 @@ fn generate_and_check_wallets(
                 found_wallets.push((private.clone(), address.clone()));
             }
         }
-    }
+    //}
     Ok(found_wallets)
 }
 
@@ -75,13 +75,28 @@ fn save_found_wallets(file_path: &str, wallets: Vec<(key::PrivateKey, Address)>)
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let wallets = load_wallets("data/wallets.txt");
-    let found_wallets = generate_and_check_wallets(&wallets)?;
 
-    if !found_wallets.is_empty() {
-        save_found_wallets("data/found_wallets.txt", found_wallets);
-    } else {
-        println!("No matching wallets found.");
+    let mut wallet_count = 0;
+    let mut start_time = Instant::now(); // Tornar a variável mutável
+
+    loop {
+        let found_wallets = generate_and_check_wallets(&wallets)?;
+        wallet_count += 10;
+
+        // Calcula o tempo decorrido e o número de carteiras por segundo
+        let elapsed = start_time.elapsed();
+        if elapsed >= Duration::from_secs(1) {
+            let wallets_per_second = wallet_count as f64 / elapsed.as_secs_f64();
+            println!("Wallets per second: {:.2}", wallets_per_second);
+
+            // Reinicia o contador e o tempo
+            wallet_count = 0;
+            start_time = Instant::now();
+        }
+
+        if !found_wallets.is_empty() {
+            save_found_wallets("data/found_wallets.txt", found_wallets);
+            println!("Matching wallet(s) found and saved!");
+        }
     }
-
-    Ok(())
 }
