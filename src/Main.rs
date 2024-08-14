@@ -83,11 +83,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let found_wallets = generate_and_check_wallets(&wallets)?;
         wallet_count += 10;
 
-        // Calcula o tempo decorrido e o número de carteiras por segundo
+        // Calcula o tempo decorrido e o número de carteiras por minuto
         let elapsed = start_time.elapsed();
-        if elapsed >= Duration::from_secs(1) {
-            let wallets_per_second = wallet_count as f64 / elapsed.as_secs_f64();
-            println!("Wallets per second: {:.2}", wallets_per_second);
+        if elapsed >= Duration::from_secs(60) { // 60 segundos = 1 minuto
+            let wallets_per_minute = wallet_count as f64 / elapsed.as_secs_f64();
+            println!("Wallets per minute: {:.2}", wallets_per_minute * 60.0);
 
             // Reinicia o contador e o tempo
             wallet_count = 0;
